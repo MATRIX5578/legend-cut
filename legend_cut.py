@@ -4,7 +4,7 @@ import urllib.request
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
 
-VERSION = "1.0.0"; REPO = "MATRIX5578/legend-cut"
+VERSION = "1.0.1"; REPO = "MATRIX5578/legend-cut"
 FROZEN = getattr(sys, "frozen", False)                       # True لما يشتغل كـ exe
 RES = getattr(sys, "_MEIPASS", os.path.dirname(os.path.abspath(__file__)))
 for _s in ("stdout", "stderr"):                               # exe بدون كونسول: نمنع كراش الطباعة
@@ -94,9 +94,15 @@ def claude_logged():
     except Exception: return False
 
 def install_claude():
-    subprocess.run(["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", "irm https://claude.ai/install.ps1 | iex"],
-                   capture_output=True, creationflags=NOWIN, timeout=900)
-    if not claude_exe(): raise RuntimeError("ما قدرت أثبّت كلود — تأكد من النت وجرب مرة ثانية")
+    out = ""
+    for cmd in (["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", "irm https://claude.ai/install.ps1 | iex"],
+                ["cmd", "/c", "curl -fsSL https://claude.ai/install.cmd -o \"%TEMP%\\cc_install.cmd\" && \"%TEMP%\\cc_install.cmd\""]):
+        try:
+            r = subprocess.run(cmd, capture_output=True, text=True, errors="ignore", creationflags=NOWIN, timeout=900)
+            out = (r.stdout + r.stderr)[-300:]
+        except Exception as e: out = str(e)
+        if claude_exe(): return
+    raise RuntimeError("ما قدرت أثبّت كلود — تأكد من النت وجرب مرة ثانية\n" + out)
 
 def ask_claude(prompt):
     exe = claude_exe()
@@ -345,22 +351,18 @@ class App:
         try:
             if not claude_exe(): st("⬇ أجهّز كلود بالخلفية (مرة وحدة، دقيقة تقريباً)..."); install_claude()
             if not claude_logged():
-                st("🌐 كمّل تسجيل الدخول بالمتصفح بحساب Pro أو Max، وبعدها ارجع هنا")
-                p = subprocess.Popen([claude_exe(), "auth", "login"], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                                     text=True, errors="ignore", env=cl_env(), cwd=HOME, creationflags=NOWIN)
-                url = []
-                def rd():
-                    for line in p.stdout:
-                        m = re.search(r"https://\S+", line)
-                        if m and not url: url.append(m.group(0))
-                threading.Thread(target=rd, daemon=True).start()
-                for i in range(200):                            # ينتظر لين تخلص بالمتصفح (~10 دقايق)
-                    time.sleep(3)
-                    if i == 2 and url: webbrowser.open(url[0])  # لو المتصفح ما انفتح لحاله
-                    if claude_logged(): break
-                    if p.poll() is not None and i > 3: break
-                try: p.kill()
-                except Exception: pass
+                st("🌐 انفتح لك المتصفح ونافذة صغيرة — سجّل بحساب Pro أو Max، والنافذة تتسكر لحالها لما تخلص")
+                # التسجيل يحتاج نافذة طرفية حقيقية، نفتحها ونسكرها أوتوماتيك أول ما يتم التسجيل
+                for args in (["auth", "login"], []):           # لو auth login ما اشتغل، نجرب التشغيل العادي (يطلب التسجيل أول مرة)
+                    t0 = time.time()
+                    p = subprocess.Popen([claude_exe(), *args], env=cl_env(), cwd=HOME, creationflags=subprocess.CREATE_NEW_CONSOLE)
+                    while time.time() - t0 < 900:               # ينتظر لين ربع ساعة
+                        time.sleep(2)
+                        if claude_logged() or p.poll() is not None: break
+                    if p.poll() is None:
+                        try: p.kill()
+                        except Exception: pass
+                    if claude_logged() or time.time() - t0 > 8: break   # خلص، أو المستخدم سكّر النافذة بنفسه
             s.claude_ok = claude_logged()
             st("✓ تم! كلود متصل — اسحب مقطعك" if s.claude_ok else "ما اكتمل التسجيل — اضغط الزر وجرب مرة ثانية")
         except Exception as e: st(f"⚠ {e}")
