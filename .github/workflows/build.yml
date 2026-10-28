@@ -1,0 +1,58 @@
+name: Build Legend Cut
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt pyinstaller
+
+      - name: Build app
+        run: >
+          pyinstaller --noconfirm --windowed --name LegendCut
+          --icon assets/icon.ico --add-data "assets;assets"
+          --collect-all faster_whisper --collect-all ctranslate2 --collect-all onnxruntime
+          --collect-all av --collect-all tokenizers --collect-all tkinterdnd2 --collect-all imageio_ffmpeg
+          legend_cut.py
+
+      - name: Smoke test (the exe starts and its engine works)
+        shell: pwsh
+        run: |
+          $p = Start-Process dist\LegendCut\LegendCut.exe -ArgumentList "--selftest" -PassThru -Wait
+          if ($p.ExitCode -ne 0) { Get-Content "$env:USERPROFILE\.legend_cut\selftest.log"; exit 1 }
+          Get-Content "$env:USERPROFILE\.legend_cut\selftest.log"
+
+      - name: Build installer
+        shell: pwsh
+        run: |
+          choco install innosetup --no-progress -y
+          $env:APP_VERSION = if ($env:GITHUB_REF_TYPE -eq "tag") { $env:GITHUB_REF_NAME.TrimStart("v") } else { "0.0.0" }
+          & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" installer.iss
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: LegendCut-Setup
+          path: dist/LegendCut-Setup.exe
+
+      - name: Publish release
+        if: github.ref_type == 'tag'
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/LegendCut-Setup.exe
+          generate_release_notes: true
