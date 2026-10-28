@@ -120,11 +120,21 @@ def probe(src):
     if rot and abs(float(rot[1] or rot[2])) % 180 == 90: w, h = h, w
     return {"dur": int(d[1]) * 3600 + int(d[2]) * 60 + float(d[3]) if d else 0, "w": w - w % 2, "h": h - h % 2, "audio": "Audio:" in r}
 
+def load_audio(src):                                          # نقرا الصوت بـ ffmpeg المدمج (أقوى ويدعم كل الصيغ)
+    import numpy as np
+    raw = os.path.join(tempfile.mkdtemp(prefix="lcut_"), "a.f32")
+    r = subprocess.run([FF(), "-nostdin", "-y", "-loglevel", "error", "-i", src, "-vn", "-ac", "1", "-ar", "16000", "-f", "f32le", raw],
+                       capture_output=True, text=True, errors="ignore", creationflags=NOWIN)
+    if r.returncode: raise RuntimeError("ما قدرت أقرا صوت المقطع:\n" + r.stderr[-300:])
+    a = np.fromfile(raw, np.float32); shutil.rmtree(os.path.dirname(raw), ignore_errors=True)
+    return a
+
 def transcribe(src, model, cb):
     from faster_whisper import WhisperModel
+    audio = load_audio(src)
     def run(dev, ct):
         m = WhisperModel(model, device=dev, compute_type=ct)
-        segs, info = m.transcribe(src, word_timestamps=True, vad_filter=True); words = []
+        segs, info = m.transcribe(audio, word_timestamps=True, vad_filter=True); words = []
         for s in segs:
             words += [[round(w.start, 2), round(w.end, 2), w.word.strip()] for w in (s.words or [])]
             cb(min(99, int(s.end / max(info.duration, 1) * 100)))
@@ -570,7 +580,7 @@ def selftest():                                               # يشتغل وق�
                         "-i", "sine=d=6", "-shortest", v], check=True, creationflags=NOWIN)
         m = probe(v); log.write(f"probe ok {m}\nass={has_ass()}\n")
         from faster_whisper import WhisperModel
-        segs, _ = WhisperModel("tiny", device="cpu", compute_type="int8").transcribe(v, word_timestamps=True, vad_filter=True)
+        segs, _ = WhisperModel("tiny", device="cpu", compute_type="int8").transcribe(load_audio(v), word_timestamps=True, vad_filter=True)
         list(segs); log.write("whisper ok\n")
         plan = {"keep": clean([[0, 2, 0], [3, 5, 1]], m["dur"]), "titles": [{"text": "تجربة", "at": 0.2, "dur": 1}], "captions": True}
         render(v, plan, m, [[0.3, 0.8, "هلا"]], o, lambda p: None)
