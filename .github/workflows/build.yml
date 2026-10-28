@@ -51,8 +51,10 @@ jobs:
         shell: pwsh
         run: |
           $p = Start-Process dist\LegendCut\LegendCut.exe -ArgumentList "--selftest" -PassThru -Wait
-          Get-Content "$env:USERPROFILE\.legend_cut\selftest.log"
-          if ($p.ExitCode -ne 0) { exit 1 }
+          $log = "$env:USERPROFILE\.legend_cut\selftest.log"
+          $c = if (Test-Path $log) { Get-Content $log -Raw } else { "NO LOG FILE - exe exited with $($p.ExitCode) before the self-test ran" }
+          Write-Host $c
+          if ($p.ExitCode -ne 0) { ($c -split "`n") | Where-Object { $_.Trim() } | Select-Object -Last 15 | ForEach-Object { Write-Host "::error::$_" }; exit 1 }
 
       - name: Build installer
         if: env.SKIP == '0'
